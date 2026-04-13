@@ -1,6 +1,6 @@
 {
   "name": "edaten-auth",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Plug-and-play JWT auth router for Express + MongoDB",
   "type": "module",
   "main": "index.js",
@@ -8,7 +8,13 @@
     ".": "./index.js",
     "./middleware": "./middleware.js"
   },
-  "keywords": ["auth", "jwt", "express", "mongodb", "refresh-token"],
+  "keywords": [
+    "auth",
+    "jwt",
+    "express",
+    "mongodb",
+    "refresh-token"
+  ],
   "peerDependencies": {
     "express": ">=4.0.0",
     "mongoose": ">=7.0.0"
