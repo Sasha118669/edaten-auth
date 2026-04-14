@@ -3,31 +3,50 @@ import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
-// ===== User Schema =====
-// Проверяем, не создана ли модель уже (важно при hot-reload)
-const userSchema = new mongoose.Schema(
-  {
-    email: { type: String, unique: true, required: true },
-    password: { type: String, required: true },
-    refreshTokens: [{ type: String }],
-  },
-  { timestamps: true }
-);
-
-const User =
-  mongoose.models.User || mongoose.model("User", userSchema);
-
-// ===== Главная функция =====
 export default function createAuth(options = {}) {
   const {
     jwtSecret,
     jwtRefreshSecret,
     isProduction = process.env.NODE_ENV === "production",
     cookieOptions: customCookieOptions = {},
+    requiredFields = ["email"],   
+    loginField = "email",         
   } = options;
 
   if (!jwtSecret) throw new Error("[edaten-auth] jwtSecret is required");
   if (!jwtRefreshSecret) throw new Error("[edaten-auth] jwtRefreshSecret is required");
+
+  // ===== User Schema (создаём внутри, чтобы requiredFields работал) =====
+  const modelName = `User_${Date.now()}`;
+
+  const userSchema = new mongoose.Schema(
+    {
+      email:    {
+        type: String,
+        unique: true,
+        sparse: true,
+        required: requiredFields.includes("email"),
+      },
+      username: {
+        type: String,
+        unique: true,
+        sparse: true,
+        required: requiredFields.includes("username"),
+      },
+      phone:    {
+        type: String,
+        unique: true,
+        sparse: true,
+        required: requiredFields.includes("phone"),
+      },
+      password: { type: String, required: true },
+      refreshTokens: [{ type: String }],
+    },
+    { timestamps: true }
+  );
+
+  // Берём существующую модель или создаём новую
+  const User = mongoose.models.User || mongoose.model("User", userSchema);
 
   // ===== Cookie Options =====
   const cookieOptions = {
@@ -35,7 +54,7 @@ export default function createAuth(options = {}) {
     secure: isProduction,
     sameSite: isProduction ? "none" : "lax",
     maxAge: 30 * 24 * 60 * 60 * 1000,
-    ...customCookieOptions, // пользователь может переопределить
+    ...customCookieOptions,
   };
 
   // ===== JWT Helpers =====
@@ -49,18 +68,31 @@ export default function createAuth(options = {}) {
       expiresIn: "30d",
     });
 
+  // ===== Хелпер: формируем объект юзера для ответа =====
+  const formatUser = (user) => ({
+    id: user._id,
+    ...(user.email    && { email: user.email }),
+    ...(user.username && { username: user.username }),
+    ...(user.phone    && { phone: user.phone }),
+  });
+
   const router = express.Router();
 
   // ===== REGISTER =====
   router.post("/register", async (req, res) => {
-    const { email, password } = req.body;
+    const { email, username, phone, password } = req.body;
 
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      const user = await User.create({ email, password: hashedPassword });
+      const user = await User.create({
+        ...(email    && { email }),
+        ...(username && { username }),
+        ...(phone    && { phone }),
+        password: hashedPassword,
+      });
 
-      const accessToken = generateAccessToken(user);
+      const accessToken  = generateAccessToken(user);
       const refreshToken = generateRefreshToken(user);
 
       user.refreshTokens.push(refreshToken);
@@ -68,13 +100,12 @@ export default function createAuth(options = {}) {
 
       res.cookie("refreshToken", refreshToken, cookieOptions);
 
-      res.json({
-        user: { id: user._id, email: user.email },
-        accessToken,
-      });
+      res.json({ user: formatUser(user), accessToken });
     } catch (error) {
       if (error.code === 11000) {
-        return res.status(400).json({ message: "Email already exists" });
+        // Определяем какое именно поле дублируется
+        const field = Object.keys(error.keyPattern || {})[0] || "Field";
+        return res.status(400).json({ message: `${field} already exists` });
       }
       res.status(400).json({ message: error.message });
     }
@@ -82,17 +113,21 @@ export default function createAuth(options = {}) {
 
   // ===== LOGIN =====
   router.post("/login", async (req, res) => {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const loginValue = req.body[loginField];
+
+    if (!loginValue) {
+      return res.status(400).json({ message: `${loginField} is required` });
+    }
 
     try {
-      const user = await User.findOne({ email });
+      const user = await User.findOne({ [loginField]: loginValue });
       if (!user) return res.status(404).json({ message: "User not found" });
 
       const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch)
-        return res.status(400).json({ message: "Invalid credentials" });
+      if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
-      const accessToken = generateAccessToken(user);
+      const accessToken  = generateAccessToken(user);
       const refreshToken = generateRefreshToken(user);
 
       user.refreshTokens.push(refreshToken);
@@ -100,10 +135,7 @@ export default function createAuth(options = {}) {
 
       res.cookie("refreshToken", refreshToken, cookieOptions);
 
-      res.json({
-        user: { id: user._id, email: user.email },
-        accessToken,
-      });
+      res.json({ user: formatUser(user), accessToken });
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
@@ -125,7 +157,7 @@ export default function createAuth(options = {}) {
         return res.status(401).json({ message: "Invalid refresh token" });
       }
 
-      const newAccessToken = generateAccessToken(user);
+      const newAccessToken  = generateAccessToken(user);
       const newRefreshToken = generateRefreshToken(user);
 
       user.refreshTokens = user.refreshTokens.filter((t) => t !== refreshToken);
@@ -134,10 +166,7 @@ export default function createAuth(options = {}) {
 
       res.cookie("refreshToken", newRefreshToken, cookieOptions);
 
-      res.json({
-        accessToken: newAccessToken,
-        user: { id: user._id, email: user.email },
-      });
+      res.json({ user: formatUser(user), accessToken: newAccessToken });
     } catch (error) {
       res.status(401).json({ message: "Invalid or expired refresh token" });
     }
@@ -158,7 +187,6 @@ export default function createAuth(options = {}) {
       );
 
       res.clearCookie("refreshToken");
-
       res.json({ message: "Logged out" });
     } catch (error) {
       res.status(500).json({ message: error.message });

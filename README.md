@@ -38,6 +38,8 @@ await mongoose.connect(process.env.MONGO_URI);
 app.use("/auth", createAuth({
   jwtSecret: process.env.JWT_SECRET,
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
+  requiredFields: ["email"],
+  loginFields: ["email"],
 }));
 
 app.listen(3000);
@@ -51,8 +53,23 @@ app.listen(3000);
 |---|---|---|---|---|
 | `jwtSecret` | string | ✅ | — | Secret for access tokens |
 | `jwtRefreshSecret` | string | ✅ | — | Secret for refresh tokens |
+| `requiredFields` | string[] | ❌ | `[]` | Fields required on registration (`"email"`, `"username"`, `"phone"`) |
+| `loginFields` | string[] | ❌ | `["email"]` | Fields to search user by on login |
 | `isProduction` | boolean | ❌ | `NODE_ENV === "production"` | Affects cookie settings |
 | `cookieOptions` | object | ❌ | `{}` | Override default cookie options |
+
+---
+
+## User Fields
+
+Every user can have these fields — you decide which are required and which are optional:
+
+| Field | Type | Unique |
+|---|---|---|
+| `email` | string | ✅ |
+| `username` | string | ✅ |
+| `phone` | string | ✅ |
+| `password` | string | — |
 
 ---
 
@@ -61,22 +78,86 @@ app.listen(3000);
 | Method | Path | Description |
 |---|---|---|
 | POST | `/register` | Create a new user |
-| POST | `/login` | Login with email + password |
+| POST | `/login` | Login with password + any of `loginFields` |
 | POST | `/refresh` | Get a new access token |
 | POST | `/logout` | Logout and clear cookie |
 
-### Register / Login — Request body
+---
+
+## Examples
+
+### Email only (default)
+```js
+createAuth({
+  jwtSecret: process.env.JWT_SECRET,
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
+  requiredFields: ["email"],
+  loginFields: ["email"],
+})
+```
 ```json
-{
-  "email": "user@example.com",
-  "password": "yourpassword"
-}
+// POST /register
+{ "email": "user@example.com", "password": "..." }
+
+// POST /login
+{ "email": "user@example.com", "password": "..." }
 ```
 
-### Register / Login — Response
+---
+
+### Messenger app — username + phone required, login by either
+```js
+createAuth({
+  jwtSecret: process.env.JWT_SECRET,
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
+  requiredFields: ["username", "phone"],
+  loginFields: ["username", "phone"],
+})
+```
+```json
+// POST /register
+{ "username": "john", "phone": "+1234567890", "password": "..." }
+
+// POST /login — either works
+{ "username": "john", "password": "..." }
+{ "phone": "+1234567890", "password": "..." }
+```
+
+---
+
+### Email required, username optional, login by either
+```js
+createAuth({
+  jwtSecret: process.env.JWT_SECRET,
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
+  requiredFields: ["email"],
+  loginFields: ["email", "username"],
+})
+```
+```json
+// POST /register
+{ "email": "user@example.com", "username": "john", "password": "..." }
+{ "email": "user@example.com", "password": "..." } // username is optional
+
+// POST /login — either works
+{ "email": "user@example.com", "password": "..." }
+{ "username": "john", "password": "..." }
+```
+
+---
+
+## Response format
+
+All endpoints return the same user object — only fields that exist on the user are included:
+
 ```json
 {
-  "user": { "id": "...", "email": "user@example.com" },
+  "user": {
+    "id": "...",
+    "email": "user@example.com",
+    "username": "john",
+    "phone": "+1234567890"
+  },
   "accessToken": "eyJ..."
 }
 ```
@@ -91,7 +172,7 @@ Refresh token is set automatically as an **httpOnly cookie**.
 import { authMiddleware } from "edaten-auth/middleware";
 
 app.get("/profile", authMiddleware(process.env.JWT_SECRET), (req, res) => {
-  res.json({ user: req.user }); // { id, email }
+  res.json({ user: req.user });
 });
 ```
 
@@ -106,13 +187,10 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
 Your `.env`:
-
-```
 MONGO_URI=mongodb+srv://...
 JWT_SECRET=your_generated_secret
 JWT_REFRESH_SECRET=your_other_generated_secret
 NODE_ENV=development
-```
 
 ---
 
