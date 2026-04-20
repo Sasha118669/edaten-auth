@@ -1,6 +1,6 @@
 {
   "name": "edaten-auth",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Plug-and-play JWT auth router for Express + MongoDB",
   "license": "MIT",
   "type": "module",
