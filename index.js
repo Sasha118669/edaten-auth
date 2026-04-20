@@ -9,19 +9,17 @@ export default function createAuth(options = {}) {
     jwtRefreshSecret,
     isProduction = process.env.NODE_ENV === "production",
     cookieOptions: customCookieOptions = {},
-    requiredFields = ["email"],   
-    loginField = "email",         
+    requiredFields = ["email"],
+    loginField = "email",
   } = options;
 
   if (!jwtSecret) throw new Error("[edaten-auth] jwtSecret is required");
   if (!jwtRefreshSecret) throw new Error("[edaten-auth] jwtRefreshSecret is required");
 
-  // ===== User Schema (создаём внутри, чтобы requiredFields работал) =====
-  const modelName = `User_${Date.now()}`;
-
+  // ===== USER SCHEMA =====
   const userSchema = new mongoose.Schema(
     {
-      email:    {
+      email: {
         type: String,
         unique: true,
         sparse: true,
@@ -33,11 +31,11 @@ export default function createAuth(options = {}) {
         sparse: true,
         required: requiredFields.includes("username"),
       },
-      phone:    {
+      phonenumber: {
         type: String,
         unique: true,
         sparse: true,
-        required: requiredFields.includes("phone"),
+        required: requiredFields.includes("phonenumber"),
       },
       password: { type: String, required: true },
       refreshTokens: [{ type: String }],
@@ -45,10 +43,9 @@ export default function createAuth(options = {}) {
     { timestamps: true }
   );
 
-  // Берём существующую модель или создаём новую
   const User = mongoose.models.User || mongoose.model("User", userSchema);
 
-  // ===== Cookie Options =====
+  // ===== COOKIE OPTIONS =====
   const cookieOptions = {
     httpOnly: true,
     secure: isProduction,
@@ -57,42 +54,42 @@ export default function createAuth(options = {}) {
     ...customCookieOptions,
   };
 
-  // ===== JWT Helpers =====
+  // ===== JWT =====
   const generateAccessToken = (user) =>
-    jwt.sign({ id: user._id, email: user.email }, jwtSecret, {
-      expiresIn: "15m",
-    });
+    jwt.sign({ id: user._id }, jwtSecret, { expiresIn: "15m" });
 
   const generateRefreshToken = (user) =>
-    jwt.sign({ id: user._id, email: user.email }, jwtRefreshSecret, {
-      expiresIn: "30d",
-    });
+    jwt.sign({ id: user._id }, jwtRefreshSecret, { expiresIn: "30d" });
 
-  // ===== Хелпер: формируем объект юзера для ответа =====
+  // ===== FORMAT USER =====
   const formatUser = (user) => ({
     id: user._id,
-    ...(user.email    && { email: user.email }),
+    ...(user.email && { email: user.email }),
     ...(user.username && { username: user.username }),
-    ...(user.phone    && { phone: user.phone }),
+    ...(user.phonenumber && { phonenumber: user.phonenumber }),
   });
 
   const router = express.Router();
 
-  // ===== REGISTER =====
+  // ================= REGISTER =================
   router.post("/register", async (req, res) => {
-    const { email, username, phone, password } = req.body;
+    const { email, username, phonenumber, password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ message: "Password is required" });
+    }
 
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
 
       const user = await User.create({
-        ...(email    && { email }),
+        ...(email && { email }),
         ...(username && { username }),
-        ...(phone    && { phone }),
+        ...(phonenumber && { phonenumber }),
         password: hashedPassword,
       });
 
-      const accessToken  = generateAccessToken(user);
+      const accessToken = generateAccessToken(user);
       const refreshToken = generateRefreshToken(user);
 
       user.refreshTokens.push(refreshToken);
@@ -103,31 +100,40 @@ export default function createAuth(options = {}) {
       res.json({ user: formatUser(user), accessToken });
     } catch (error) {
       if (error.code === 11000) {
-        // Определяем какое именно поле дублируется
-        const field = Object.keys(error.keyPattern || {})[0] || "Field";
+        const field = Object.keys(error.keyPattern || {})[0];
         return res.status(400).json({ message: `${field} already exists` });
       }
+
       res.status(400).json({ message: error.message });
     }
   });
 
-  // ===== LOGIN =====
+  // ================= LOGIN (FIXED) =================
   router.post("/login", async (req, res) => {
     const { password } = req.body;
     const loginValue = req.body[loginField];
 
-    if (!loginValue) {
-      return res.status(400).json({ message: `${loginField} is required` });
+    if (!loginValue || !password) {
+      return res.status(400).json({
+        message: `${loginField} and password are required`,
+      });
     }
 
     try {
-      const user = await User.findOne({ [loginField]: loginValue });
-      if (!user) return res.status(404).json({ message: "User not found" });
+      const user = await User.findOne({
+        [loginField]: loginValue,
+      });
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
 
       const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+      if (!isMatch) {
+        return res.status(400).json({ message: "Invalid credentials" });
+      }
 
-      const accessToken  = generateAccessToken(user);
+      const accessToken = generateAccessToken(user);
       const refreshToken = generateRefreshToken(user);
 
       user.refreshTokens.push(refreshToken);
@@ -141,7 +147,7 @@ export default function createAuth(options = {}) {
     }
   });
 
-  // ===== REFRESH =====
+  // ================= REFRESH =================
   router.post("/refresh", async (req, res) => {
     const { refreshToken } = req.cookies;
 
@@ -157,22 +163,28 @@ export default function createAuth(options = {}) {
         return res.status(401).json({ message: "Invalid refresh token" });
       }
 
-      const newAccessToken  = generateAccessToken(user);
+      const newAccessToken = generateAccessToken(user);
       const newRefreshToken = generateRefreshToken(user);
 
-      user.refreshTokens = user.refreshTokens.filter((t) => t !== refreshToken);
+      user.refreshTokens = user.refreshTokens.filter(
+        (t) => t !== refreshToken
+      );
+
       user.refreshTokens.push(newRefreshToken);
       await user.save();
 
       res.cookie("refreshToken", newRefreshToken, cookieOptions);
 
-      res.json({ user: formatUser(user), accessToken: newAccessToken });
+      res.json({
+        user: formatUser(user),
+        accessToken: newAccessToken,
+      });
     } catch (error) {
       res.status(401).json({ message: "Invalid or expired refresh token" });
     }
   });
 
-  // ===== LOGOUT =====
+  // ================= LOGOUT =================
   router.post("/logout", async (req, res) => {
     const { refreshToken } = req.cookies;
 
