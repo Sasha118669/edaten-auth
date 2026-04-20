@@ -1,8 +1,3 @@
-Вот тебе **чистый README.md**, без лишних форматирований типа `id=""`, готовый чтобы просто **скопировать и вставить в файл** 👇
-
----
-
-````md
 # edaten-auth
 
 Plug-and-play JWT authentication router for **Express + MongoDB**.  
@@ -14,15 +9,16 @@ Just plug it in — register, login, refresh, logout out of the box.
 
 ```bash
 npm install edaten-auth
-````
+```
 
 ---
 
 ## Requirements
 
-* Express >= 4.0.0
-* Mongoose >= 7.0.0
-* cookie-parser (must be added to your app)
+- Express >= 4.0.0  
+- Mongoose >= 7.0.0  
+- cookie-parser (must be added to your app)  
+- MongoDB connection must be established before using the library  
 
 ```bash
 npm install express mongoose cookie-parser
@@ -43,6 +39,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
+// IMPORTANT: connect MongoDB BEFORE using auth
 await mongoose.connect(process.env.MONGO_URI);
 
 app.use("/auth", createAuth({
@@ -57,52 +54,78 @@ app.listen(3000);
 
 ---
 
+## ⚠️ Important Notes (FIXED ISSUES)
+
+### MongoDB connection issues
+
+If you see errors like:
+
+```
+Operation users.insertOne() buffering timed out after 10000ms
+```
+
+It means MongoDB is not connected before routes are used.
+
+### Fix:
+
+Always ensure:
+
+```js
+await mongoose.connect(process.env.MONGO_URI);
+```
+
+runs BEFORE:
+
+```js
+app.use("/auth", createAuth(...))
+```
+
+---
+
 ## Options
 
-| Option             | Type     | Required | Default                     | Description                                                          |
-| ------------------ | -------- | -------- | --------------------------- | -------------------------------------------------------------------- |
-| `jwtSecret`        | string   | ✅        | —                           | Secret for access tokens                                             |
-| `jwtRefreshSecret` | string   | ✅        | —                           | Secret for refresh tokens                                            |
-| `requiredFields`   | string[] | ❌        | `[]`                        | Fields required on registration (`email`, `username`, `phonenumber`) |
-| `loginField`       | string   | ❌        | `"email"`                   | Field used to find user on login                                     |
-| `isProduction`     | boolean  | ❌        | `NODE_ENV === "production"` | Affects cookie settings                                              |
-| `cookieOptions`    | object   | ❌        | `{}`                        | Override default cookie options                                      |
+| Option             | Type     | Required | Default                     | Description |
+|--------------------|----------|----------|-----------------------------|-------------|
+| jwtSecret          | string   | ✅        | —                           | Secret for access tokens |
+| jwtRefreshSecret   | string   | ✅        | —                           | Secret for refresh tokens |
+| requiredFields     | string[] | ❌        | []                          | Fields required on register |
+| loginField         | string   | ❌        | "email"                     | Field used for login |
+| isProduction       | boolean  | ❌        | NODE_ENV === "production"   | Cookie settings mode |
+| cookieOptions      | object   | ❌        | {}                          | Override cookies |
 
 ---
 
 ## User Fields
 
-Every user can have these fields — you decide which are required:
-
 | Field         | Type   | Unique |
-| ------------- | ------ | ------ |
-| `email`       | string | ✅      |
-| `username`    | string | ✅      |
-| `phonenumber` | string | ✅      |
-| `password`    | string | —      |
+|---------------|--------|--------|
+| email         | string | ✅     |
+| username      | string | ✅     |
+| phonenumber   | string | ✅     |
+| password      | string | —      |
 
 ---
 
 ## Endpoints
 
-| Method | Path        | Description                       |
-| ------ | ----------- | --------------------------------- |
-| POST   | `/register` | Create a new user                 |
-| POST   | `/login`    | Login using loginField + password |
-| POST   | `/refresh`  | Get a new access token            |
-| POST   | `/logout`   | Logout and clear cookie           |
+| Method | Path        | Description |
+|--------|------------|-------------|
+| POST   | /register  | Create user |
+| POST   | /login     | Login user |
+| POST   | /refresh   | Refresh token |
+| POST   | /logout    | Logout user |
 
 ---
 
 ## How Login Works
 
-Login uses a single field defined in config:
+Login uses one field defined in config:
 
-* email
-* username
-* phonenumber
+- email
+- username
+- phonenumber
 
-### Request format
+### Example request
 
 ```json
 {
@@ -144,14 +167,6 @@ createAuth({
 })
 ```
 
-```json
-// POST /register
-{ "email": "user@example.com", "password": "123456" }
-
-// POST /login
-{ "email": "user@example.com", "password": "123456" }
-```
-
 ---
 
 ### Username login
@@ -165,14 +180,6 @@ createAuth({
 })
 ```
 
-```json
-// POST /register
-{ "username": "john", "password": "123456" }
-
-// POST /login
-{ "username": "john", "password": "123456" }
-```
-
 ---
 
 ### Phone login
@@ -184,14 +191,6 @@ createAuth({
   requiredFields: ["phonenumber"],
   loginField: "phonenumber",
 })
-```
-
-```json
-// POST /register
-{ "phonenumber": "+1234567890", "password": "123456" }
-
-// POST /login
-{ "phonenumber": "+1234567890", "password": "123456" }
 ```
 
 ---
@@ -243,7 +242,18 @@ NODE_ENV=development
 
 ---
 
+## Version
+
+**Current stable version: 2.0.0**
+
+Includes:
+- fixed MongoDB connection timing issues  
+- stable register/login flow  
+- improved refresh + logout handling  
+- peer dependency architecture  
+
+---
+
 ## License
 
 MIT
-
