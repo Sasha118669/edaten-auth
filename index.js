@@ -44,6 +44,7 @@ export default function createAuth(options = {}) {
   );
 
   const User = mongoose.models.User || mongoose.model("User", userSchema);
+  await User.syncIndexes();
 
   // ===== COOKIE OPTIONS =====
   const cookieOptions = {
